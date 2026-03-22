@@ -4,7 +4,7 @@ A collection of Python implementations of the Finite Element Method (FEM) applie
 
 ## Overview
 This repository provides clean, well-documented Python implementations of FEM solvers for structural analysis. Each problem is implemented with:
-Stiffness matrix assembly
-Boundary condition application
-Displacement and stress computation
-Mesh visualization (original vs. deformed)
+* Stiffness matrix assembly
+* Boundary condition application
+* Displacement and stress computation
+* Mesh visualization (original vs. deformed)
