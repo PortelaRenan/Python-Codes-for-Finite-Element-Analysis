@@ -150,15 +150,18 @@ def mesh(numberElements: int, elementNodes: list[tuple[int, int]], nodeCoordinat
         - Deformed nodes and members are drawn in red (solid and dashed lines).
         - Displacements are scaled by a factor of 5e2 for visualization purposes.
     """
-    
+
     plt.figure()
 
     nodes = np.array(nodeCoordinates)
     plt.scatter(nodes[:, 0], nodes[:, 1], color = 'black')
 
-    displacements = displacement.reshape((-1, 2))*5e2
+    displacements = displacement.reshape((-1, 2))*1e2
     newCoord = nodeCoordinates + displacements
     plt.scatter(newCoord[:, 0], newCoord[:, 1], color = 'red')
+
+    undeformed_plotted = False  
+    deformed_plotted = False    
 
     for element in range(numberElements):
         nodes = elementNodes[element]
@@ -169,7 +172,9 @@ def mesh(numberElements: int, elementNodes: list[tuple[int, int]], nodeCoordinat
         x2 = nodeCoordinates[nodes[1]][0]
         y2 = nodeCoordinates[nodes[1]][1]
 
-        plt.plot([x1, x2], [y1, y2], c = 'blue')
+        plt.plot([x1, x2], [y1, y2], c = 'blue',
+                 label='Undeformed' if not undeformed_plotted else '_nolegend_')
+        undeformed_plotted = True
 
         x1 = newCoord[nodes[0]][0]
         y1 = newCoord[nodes[0]][1]
@@ -177,6 +182,9 @@ def mesh(numberElements: int, elementNodes: list[tuple[int, int]], nodeCoordinat
         x2 = newCoord[nodes[1]][0]
         y2 = newCoord[nodes[1]][1]
 
-        plt.plot([x1, x2], [y1, y2], c = 'red', linestyle = 'dashed')
+        plt.plot([x1, x2], [y1, y2], c = 'red', linestyle='dashed',
+                 label='Deformed' if not deformed_plotted else '_nolegend_')
+        deformed_plotted = True
 
+    plt.legend()
     plt.show()
