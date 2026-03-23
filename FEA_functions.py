@@ -130,6 +130,61 @@ def stress2Dtruss(numberElements: int, elementNodes: list[tuple[int, int]], node
     
     return sigma
 
+def BernoulliBeam(GDOF, elementNodes, nodeCoordinates, E, I):
+
+    stiffness = np.zeros((GDOF, GDOF))
+
+    for element in range(np.size(elementNodes,0)):
+        indices = elementNodes[element]
+        DOF = [2*indices[0], 2*indices[0] + 1, 2*indices[1], 2*indices[1] + 1]    
+
+        length = nodeCoordinates[indices[1]] - nodeCoordinates[indices[0]]
+        localStiffness = E*I/length**3*np.array([
+            [12, 6*length, -12, 6*length],
+            [6*length, 4*length**2, -6*length, 2*length**2],
+            [-12, -6*length, 12, -6*length],
+            [6*length, 2*length**2, -6*length, 4*length**2]
+        ])
+
+        stiffness[np.ix_(DOF, DOF)] += localStiffness
+
+    return stiffness
+
+def BernoulliBeamBC(bc: str = 'Simply supported', numberElements: int = None):
+    valid_bc = ['Simply supported', 'Clamped-clamped', 'Clamped']
+    
+    if bc not in valid_bc:
+        raise ValueError(
+            f"Invalid boundary condition '{bc}'. Valid options are: {valid_bc}."
+        )
+    
+    if numberElements is None or numberElements <= 0:
+        raise ValueError("numberElements must be a positive integer.")
+    
+    if bc == 'Simply supported':
+        fixedDOF = [0, 2 * numberElements]
+    elif bc == 'Clamped-clamped':
+        fixedDOF = [0, 1, 2 * numberElements, 2 * numberElements + 1]
+    else:  # Clamped at x = 0
+        fixedDOF = [0, 1]  
+
+    return fixedDOF
+
+def distributedLoad(GDOF, elementNodes, nodeCoordinates, P):
+
+    load = np.zeros(GDOF)
+    for element in range(np.size(elementNodes,0)):
+        indices = elementNodes[element]
+        DOF = [2*indices[0], 2*indices[0] + 1, 2*indices[1], 2*indices[1] + 1]    
+
+        length = nodeCoordinates[indices[1]] - nodeCoordinates[indices[0]]
+        
+        localLoad = P*length*np.array([1/2, length/12, 1/2, -length/12])
+
+        load[DOF] += localLoad
+
+    return load
+
 def mesh(numberElements: int, elementNodes: list[tuple[int, int]], nodeCoordinates: list[tuple[float, float]], displacement: list[float],) -> None:
     """
     Plot the original and deformed configurations of a 2D truss structure.
