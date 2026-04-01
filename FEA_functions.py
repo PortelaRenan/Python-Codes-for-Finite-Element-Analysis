@@ -1,4 +1,6 @@
+import os
 import numpy as np
+from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.collections import PolyCollection
 
@@ -715,3 +717,177 @@ def forceVector(GDOF, elementNodes, nodeCoordinates, P, elementType, dofPerNode)
             force[DOF] += shapeFunction*P*np.linalg.det(Jacob)*w
 
     return force
+
+def massMatrixTimoshenko(rho, thickness, nodeCoordinates, elementNodes, GDOF, n = 2):
+
+    numberNodes = np.size(nodeCoordinates,0)
+
+    # computation of stiffness matrix  for Timoshenko beam element
+    mass = np.zeros((GDOF, GDOF))
+    I = thickness**3/12
+    gp_coords, gp_weights = gaussPoints(n)
+
+    # bending contribution for stiffness matrix
+    for i in range(len(elementNodes) - 1):
+        indice = elementNodes[i]
+        massDOF = [indice[0] + numberNodes, indice[1] + numberNodes]
+        lengthElement = nodeCoordinates[indice[1]] - nodeCoordinates[indice[0]]
+        detJacobian = lengthElement/2
+        
+        for j in range(n):
+            point = gp_coords[j]
+            N, _ = shapeFunctionL2(point)
+
+            mass[np.ix_(massDOF, massDOF)] += np.array(N)@ np.array(N).T*I*rho*detJacobian*gp_weights[j]
+            mass[np.ix_(indice, indice)] += np.array(N)@ np.array(N).T*thickness*rho*detJacobian*gp_weights[j]
+
+    return mass
+
+
+def forceTimoshenko(GDOF, nodeCoordinates, elementNodes, P, n = 2):
+    
+    force = np.zeros(GDOF)
+
+    numberNodes = np.size(nodeCoordinates,0)
+
+    gp_coords, gp_weights = gaussPoints(n)
+
+    # bending contribution for stiffness matrix
+    for i in range(len(elementNodes) - 1):
+        indice = elementNodes[i]
+        
+        DOF = [indice[0], indice[1]]
+        
+        lengthElement = nodeCoordinates[DOF[1]] - nodeCoordinates[DOF[0]]
+        detJacobian = lengthElement/2
+
+        for j in range(2):
+            point = gp_coords[j]
+            N, _ = shapeFunctionL2(point)
+
+            # Force vector        
+            force[DOF] += (np.array(N)*P*detJacobian*gp_weights[j]).flatten()
+            
+    return force
+
+def stiffnessTimoshenko(C, GDOF, elementNodes, nodeCoordinates, n = 2):
+    
+    # computation of stiffness matrix  for Timoshenko beam element
+    stiffness = np.zeros((GDOF, GDOF))
+
+    numberNodes = np.size(nodeCoordinates,0)
+
+    gp_coords, gp_weights = gaussPoints(n)
+
+    # bending contribution for stiffness matrix
+    for i in range(len(elementNodes) - 1):
+        indice = elementNodes[i]
+        
+        DOF = [indice[0], indice[1], indice[0] + numberNodes, indice[1] + numberNodes]
+        
+        lengthElement = nodeCoordinates[DOF[1]] - nodeCoordinates[DOF[0]]
+        detJacobian = lengthElement/2
+
+        for j in range(n):
+            point = gp_coords[j]
+            N, naturalDerivative = shapeFunctionL2(point)
+            Xderivatives = naturalDerivative/detJacobian
+
+            # B matrix
+            B = np.zeros((2,4))
+            B[np.ix_([0], [2, 3])] = Xderivatives
+
+            # Stiffness matrix
+            stiffness[np.ix_(DOF, DOF)] += B.T @ B*gp_weights[j]*detJacobian*C[0,0]
+
+
+    # shear contribution for stiffness matrix
+    gp_coords, gp_weights = gaussPoints(1)
+
+    for i in range(len(elementNodes) - 1):
+        indice = elementNodes[i]
+        DOF = [indice[0], indice[1], indice[0] + numberNodes, indice[1] + numberNodes]
+        lengthElement = nodeCoordinates[DOF[1]] - nodeCoordinates[DOF[0]]
+        detJacobian = lengthElement/2
+        for j in range(1):
+            point = gp_coords[j]
+            N, naturalDerivative = shapeFunctionL2(point)
+            Xderivative = naturalDerivative/detJacobian
+            
+            # B matrix
+            B = np.zeros((2,4))
+            B[np.ix_([0], [0, 1])] = Xderivatives
+            B[np.ix_([0], [2, 3])] = np.array(N).T
+            
+            # Stiffness matrix
+            stiffness[np.ix_(DOF, DOF)] += B.T @ B*gp_weights[j]*detJacobian*C[1,1]
+
+    return stiffness
+
+def fmt_array(arr: np.ndarray) -> str:
+        return np.array2string(arr, precision=2, suppress_small=True, separator=", ")
+
+def resultTable(displacement, reaction, nameProblem, clear_screen=True, width=120, **others):
+    if clear_screen:
+        os.system("cls" if os.name == "nt" else "clear")
+
+    separator = "=" * width
+
+    print(separator)
+    print(f" {nameProblem}  |  {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+    print(separator)
+    print(f"  displacement: {fmt_array(displacement)}")
+    print(f"  reaction: {fmt_array(reaction)}")
+
+    for name, value in others.items():
+        shape_info = f"{value.shape}: " if isinstance(value, np.ndarray) else ""
+        formatted = fmt_array(value) if isinstance(value, np.ndarray) else repr(value)
+        print(f"  {name:<12} {shape_info}{formatted}")
+
+    print(separator)
+
+def vibrationModes(V, D, mask, numberNodes, nodeCoordinates, width = 120, **others):
+
+    if True:
+        os.system("cls" if os.name == "nt" else "clear")
+
+    separator = "=" * width
+
+    eigenvectors[np.ix_(mask, mask)] = D
+    eigenvectors = eigenvectors[0:numberNodes, 0: numberNodes]
+
+    fig, ax = plt.subplots(4, 1, figsize=(8, 12))
+    for i in range(4):
+        mode = eigenvectors[:, i + 1]
+        ax[i].plot(nodeCoordinates, mode, marker='o')
+        ax[i].grid()
+        ax[i].set_ylim(-100, 100)
+        ax[i].set_xlim(0, 1)
+        ax[i].set_title(f"Mode {i+1}")
+        ax[i].set_ylabel("Displacement")
+        if i < 3:
+            ax[i].tick_params(labelbottom=False)   # ← hides x tick labels
+
+    plt.xlabel("Beam length")
+    plt.tight_layout()
+    plt.show()
+
+    # Natural frequencies (rad/s)
+    omega = np.sqrt(V)
+
+    # Convert to Hz
+    frequencies = omega / (2 * np.pi)
+
+    print(separator)
+    print(f" Vibration Modes  |  {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+    print(separator)
+    print(f"  omega: {fmt_array(omega)}")
+    print(f"  frequencies: {fmt_array(frequencies)}")
+
+
+    for name, value in others.items():
+        shape_info = f"{value.shape}: " if isinstance(value, np.ndarray) else ""
+        formatted = fmt_array(value) if isinstance(value, np.ndarray) else repr(value)
+        print(f"  {name:<12} {shape_info}{formatted}")
+
+    print(separator)
