@@ -322,11 +322,11 @@ def rectangularMesh(Lx,Ly,numberElementsX,numberElementsY, elementType):
         x = np.linspace(0, Lx, numberElementsX + 1)
         y = np.linspace(0, Ly, numberElementsY + 1)
         N = np.arange(0, (numberElementsX + 1)*(numberElementsY + 1), dtype= object)
-        N = N.reshape(numberElementsX + 1,numberElementsX + 1)
+        N = N.reshape(numberElementsX + 1,numberElementsY + 1)
 
         X, Y = np.meshgrid(x, y)
 
-        return np.stack((X.flatten(), Y.flatten()), axis=1), [[N[i, j], N[i+1, j], N[i+1, j+1], N[i, j+1]] for i in range(numberElementsX) for j in range(numberElementsY)]   
+        return np.stack((X.flatten(), Y.flatten()), axis=1), [[N[i, j], N[i, j+1], N[i+1, j+1], N[i+1, j]] for i in range(numberElementsX) for j in range(numberElementsY)]   
 
 
 def drawingMesh(nodeCoordinates, elementNodes, elementType):
@@ -344,11 +344,16 @@ def drawingMesh(nodeCoordinates, elementNodes, elementType):
         ax.set_aspect('equal')
         plt.show()
         
-'''
-def plateStiffness(GDOF, elementNodes, elementType, nodeCoordinates, dofPerNode):
+def plateKirchhoffStiffness(GDOF, elementNodes, elementType, nodeCoordinates, dofPerNode):
     stiffness = np.zeros((GDOF, GDOF))
 
     points, weights = gaussPoints(elementType)
+
+    XP, YP = np.meshgrid(points, points)
+    XW, YW = np.meshgrid(weights, weights)
+    
+    gsPoints = np.stack((XP.flatten(), YP.flatten()), axis=1)
+    gsWeights = np.stack((XW.flatten(), YW.flatten()), axis=1)
 
     # cycle for element
     for nodes in elementNodes:
@@ -361,16 +366,83 @@ def plateStiffness(GDOF, elementNodes, elementType, nodeCoordinates, dofPerNode)
                    nodes + len(nodeCoordinates), 
                    nodes + 2*len(nodeCoordinates),
                    nodes + 3*len(nodeCoordinates)]
-
+      
         # cycle for Gauss point
-        for p in points:
-            
+        for p, w in zip(gsPoints, gsWeights):
             # part related to the mapping
             # shape functions and derivatives
+            _,natDerQ4 = shapeFunctionQ4(p[0],p[1])
 
-    pass
+            if dofPerNode == 3:
+                _, naturalDerivatives = shapeFunctionNotConforming(p[0], p[1])
+            elif dofPerNode == 4:
+                _, naturalDerivatives = shapeFunctionConforming(p[0], p[1])
+            
+            Jacob, _ = Jacobian(nodes, natDerQ4)
+            XYDer = nodes.T @ natDerQ4
 
-'''
+            detJ_xi = XYDer[0,0]*XYDer[1,4] - XYDer[1,0]*XYDer[0,4]
+            + XYDer[1,1]*XYDer[0,2] - XYDer[0,1]*XYDer[1,2]
+            detJ_eta = -XYDer[0,1]*XYDer[1,4] + XYDer[1,1]*XYDer[0,4]
+            - XYDer[1,0]*XYDer[0,3] + XYDer[0,0]*XYDer[1,3]
+
+            xi_xx = np.linalg.det(Jacob)**(-2)*(XYDer[1,1]*XYDer[1,4]
+            - XYDer[1,1]**2/np.linalg.det(Jacob)*detJ_xi - XYDer[1,0]*XYDer[1,3] 
+            + XYDer[1,0]*XYDer[1,1]/np.linalg.det(Jacob)*detJ_eta)
+
+            xi_yy = np.linalg.det(Jacob)**(-2)*(XYDer[0,1]*XYDer[0,4] - XYDer[0,1]**2/np.linalg.det(Jacob)*detJ_xi
+            - XYDer[0,0]*XYDer[0,3] + XYDer[0,0]*XYDer[0,1]/np.linalg.det(Jacob)*detJ_eta)
+
+            eta_xx = np.linalg.det(Jacob)**(-2)*(-XYDer[1,1]*XYDer[1,2] + XYDer[1,1]*XYDer[1,0]/np.linalg.det(Jacob)*detJ_xi 
+            + XYDer[1,0]*XYDer[1,4] - XYDer[1,0]**2/np.linalg.det(Jacob)*detJ_eta)
+
+            eta_yy = np.linalg.det(Jacob)**(-2)*(-XYDer[0,1]*XYDer[0,2] + XYDer[0,1]*XYDer[0,0]/np.linalg.det(Jacob)*detJ_xi 
+            + XYDer[0,0]*XYDer[0,4] - XYDer[0,0]**2/np.linalg.det(Jacob)*detJ_eta)
+
+            xi_xy = np.linalg.det(Jacob)**(-2)*(-XYDer[1,1]*XYDer[0,4] + XYDer[1,1]*XYDer[0,1]/np.linalg.det(Jacob)*detJ_xi 
+            + XYDer[1,0]*XYDer[0,3] - XYDer[1,0]*XYDer[0,1]/np.linalg.det(Jacob)*detJ_eta)
+
+            eta_xy = np.linalg.det(Jacob)**(-2)*(-XYDer[1,0]*XYDer[0,4] - XYDer[1,1]*XYDer[0,0]/np.linalg.det(Jacob)*detJ_xi 
+            + XYDer[1,1]*XYDer[0,2] + XYDer[1,0]*XYDer[0,0]/np.linalg.det(Jacob)*detJ_eta)
+
+            # [B] matrix bending
+            xi_x = np.linalg.inv(Jacob)[0,0]
+            xi_y = np.linalg.inv(Jacob)[1,0]
+            eta_x = np.linalg.inv(Jacob)[0,1]
+            eta_y = np.linalg.inv(Jacob)[1,1]
+            
+            B_b = np.zeros((3, GDOF))
+
+            B_b[0, 0:GDOF] = (
+                xi_x**2 * naturalDerivatives[:, 2].T +
+                eta_x**2 * naturalDerivatives[:, 3].T +
+                2 * xi_x * eta_x * naturalDerivatives[:, 4].T +
+                xi_xx * naturalDerivatives[:, 0].T +
+                eta_xx * naturalDerivatives[:, 1].T
+            )
+
+            B_b[1, 0:GDOF] = (
+                xi_y**2 * naturalDerivatives[:, 2].T +
+                eta_y**2 * naturalDerivatives[:, 3].T +
+                2 * xi_y * eta_y * naturalDerivatives[:, 4].T +
+                xi_yy * naturalDerivatives[:, 0].T +
+                eta_yy * naturalDerivatives[:, 1].T
+            )
+
+            B_b[2, 0:GDOF] = 2 * (
+                xi_x * xi_y * naturalDerivatives[:, 2].T +
+                eta_x * eta_y * naturalDerivatives[:, 3].T +
+                (xi_x * eta_y + xi_y * eta_x) * naturalDerivatives[:, 4].T +
+                xi_xy * naturalDerivatives[:, 0].T +
+                eta_xy * naturalDerivatives[:, 1].T
+            )
+
+
+
+            # stiffness matrix bending
+            stiffness[np.ix_(DOF, DOF)] +=B_b.T*C_bending*B_b*gaussWeights(q)*det(Jacob)
+
+    raise NotImplemented
 
 def plateBC(typeBC, nodeCoordinates, GDOF):
     xx = nodeCoordinates[:, 0]
@@ -434,7 +506,7 @@ def plateBC(typeBC, nodeCoordinates, GDOF):
         fixedNodeTY + 2*len(nodeCoordinates)
     ])
     
-    mask = np.arange(GDOF + 1)
+    mask = np.arange(GDOF)
     return np.bool([0 if x in fixedDOF else 1 for x in mask])
 
 def shapeFunctionNotConforming(xi, eta):
@@ -652,7 +724,8 @@ def shapeFunctionQ4(xi, eta):
     shapeFunction = 1/4*np.array([[(1 - xi)*(1 - eta)],
                          [(1 + xi)*(1 - eta)],
                          [(1 + xi)*(1 + eta)],
-                         [(1 - xi)*(1 + eta)]]), 
+                         [(1 - xi)*(1 + eta)]
+    ]) 
     
     # natural derivatives order:
     # [d/dx, d/dy, d^2/dx^2, d^2/dy^2, d^2/dxdy]
@@ -891,3 +964,133 @@ def vibrationModes(V, D, mask, numberNodes, nodeCoordinates, width = 120, **othe
         print(f"  {name:<12} {shape_info}{formatted}")
 
     print(separator)
+
+def plateMindlinStiffness(GDOF, elementNodes, numberNodes, CShear, CBending, nodeCoordinates, dofPerNode):
+    stiffness = np.zeros((GDOF, GDOF))
+
+    points, weights = gaussPoints(2)
+
+    XP, YP = np.meshgrid(points, points)
+    XW, YW = np.meshgrid(weights, weights)
+
+    gsPoints = np.stack((XP.flatten(), YP.flatten()), axis=1)
+    gsWeights = np.stack((XW.flatten(), YW.flatten()), axis=1)
+
+    # cycle for element
+    for nodes in elementNodes:
+        DOF = [nodes[0], nodes[1], nodes[2], nodes[3], 
+                nodes[0] + numberNodes, nodes[1] + numberNodes, nodes[2] + numberNodes, nodes[3] + numberNodes,
+                nodes[0] + 2*numberNodes, nodes[1] + 2*numberNodes, nodes[2] + 2*numberNodes, nodes[3] + 2*numberNodes]
+        ndof = len(nodes)
+
+        # cycle for Gauss point
+        for p, w in zip(gsPoints, gsWeights):
+            # part related to the mapping
+            # shape functions and derivatives
+            shapeFunction, natDerQ4 = shapeFunctionQ4(p[0],p[1])
+            natDerQ4 = natDerQ4[:, :2]
+
+            # Jacobian matrix - derivatives w.r.t. x,y
+            Jacob, _ = Jacobian(nodeCoordinates[nodes], natDerQ4)
+            XYDer = np.linalg.inv(Jacob) @ natDerQ4.T
+            detJ = np.linalg.det(Jacob)
+            
+            # [B] matrix bending
+            BBending = np.zeros((3, 3*ndof))
+            BBending[0, ndof:2*ndof]   = XYDer[0, :]
+            BBending[1, 2*ndof:3*ndof] = XYDer[1, :]
+            BBending[2, ndof:2*ndof]   = XYDer[1, :]
+            BBending[2, 2*ndof:3*ndof] = XYDer[0, :]
+
+            # Stiffness matrix - bending
+            stiffness[np.ix_(DOF, DOF)] += BBending.T @ CBending @ BBending * w[0]*w[1]*detJ
+        
+
+    points, weights = gaussPoints(1)
+
+    XP, YP = np.meshgrid(points, points)
+    XW, YW = np.meshgrid(weights, weights)
+
+    gsPoints = np.stack((XP.flatten(), YP.flatten()), axis=1)
+    gsWeights = np.stack((XW.flatten(), YW.flatten()), axis=1)
+
+    # cycle for element
+    for nodes in elementNodes:
+        DOF = [nodes[0], nodes[1], nodes[2], nodes[3], 
+                nodes[0] + numberNodes, nodes[1] + numberNodes, nodes[2] + numberNodes, nodes[3] + numberNodes,
+                nodes[0] + 2*numberNodes, nodes[1] + 2*numberNodes, nodes[2] + 2*numberNodes, nodes[3] + 2*numberNodes]
+        ndof = len(nodes)
+
+        # cycle for Gauss point
+        for p, w in zip(gsPoints, gsWeights):
+            # part related to the mapping
+            # shape functions and derivatives
+            shapeFunction, natDerQ4 = shapeFunctionQ4(p[0],p[1])
+            natDerQ4 = natDerQ4[:, :2]
+
+            # Jacobian matrix - derivatives w.r.t. x,y
+            Jacob, _ = Jacobian(nodeCoordinates[nodes], natDerQ4)
+            XYDer = np.linalg.inv(Jacob) @ natDerQ4.T
+            detJ = np.linalg.det(Jacob)
+
+            # [B] matrix bending
+            BShear = np.zeros((2, 3*ndof))
+            BShear[0, 0:ndof] = XYDer[0,:]
+            BShear[1, 0:ndof] = XYDer[1,:]
+            BShear[0, ndof:2*ndof]   = shapeFunction.flatten()   # −θx
+            BShear[1, 2*ndof:3*ndof] = shapeFunction.flatten()   # −θy
+            
+            # Stiffness matrix - bending
+            stiffness[np.ix_(DOF, DOF)] += BShear.T @ CShear @ BShear * w[0]*w[1]*detJ
+
+    return stiffness
+
+def plateMindlinForce(GDof, numberElements, elementNodes, numberNodes, nodeCoordinates, P):
+    """
+    Computation of force vector for Mindlin plate element.
+
+    Inputs:
+        GDof           - Total number of degrees of freedom
+        numberElements - Number of elements
+        elementNodes   - (numElements x 4) connectivity array
+        numberNodes    - Total number of nodes
+        nodeCoordinates- (numNodes x 2) [x, y] node coordinates
+        P              - Distributed load magnitude
+
+    Outputs:
+        force          - (GDof,) force vector
+    """
+
+    force = np.zeros(GDof)
+
+    # Gauss quadrature (reduced integration for Mindlin)
+    points, weights = gaussPoints(1)
+
+    XP, YP = np.meshgrid(points, points)
+    XW, YW = np.meshgrid(weights, weights)
+
+    gsPoints = np.stack((XP.flatten(), YP.flatten()), axis=1)
+    gsWeights = np.stack((XW.flatten(), YW.flatten()), axis=1)
+    
+    # cycle for element
+    for nodes in elementNodes:
+
+        # cycle for Gauss point
+        for p, w in zip(gsPoints, gsWeights):
+            
+            # part related to the mapping
+            # shape functions and derivatives
+            shapeFunction, natDerQ4 = shapeFunctionQ4(p[0],p[1])
+            natDerQ4 = natDerQ4[:, :2]
+
+            # Jacobian matrix - derivatives w.r.t. x,y
+            Jacob, _ = Jacobian(nodeCoordinates[nodes], natDerQ4)
+            XYDer = np.linalg.inv(Jacob) @ natDerQ4.T          
+
+            # Jacobian, inverse Jacobian, physical derivatives
+            Jacob, _ = Jacobian(nodeCoordinates[nodes], natDerQ4)
+
+            # Assemble force vector at the nodes of this element
+            force[nodes] += shapeFunction.flatten() * P * np.linalg.det(Jacob) * w[0] * w[1]
+
+    return force
